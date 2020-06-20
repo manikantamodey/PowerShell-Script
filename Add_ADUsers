@@ -42,6 +42,7 @@ Write-Output $password}
 } 
 
 #This function creates a CSV file for the list of users to be added to AD.
+#One Output folder needs to be created for the script to save the CSV file for adding Users.
 #It will take the password from the Random Password generator function and the inputs provided by the user to create the CSV File.
 function Input_Csv
 {
@@ -83,7 +84,11 @@ Function Yellow
 { process {Write-Host $_ -ForegroundColor Yellow}
 }
 
-#This function adds the users to AD using the CSV file created by Input_Csv Function and the password created by Random Password function.
+#Few folders need to be created for this function to work. 
+#In addition to the Input folder created in the above Input_CSV function, one Output folder needs to be created for this function to save the Users credentials file.
+#This function will verify if the users in the CSV file exists or not. If exists, throws a message stating the users already exist.
+#If Users doesnot exist, it will add the users to AD using the CSV file created by Input_Csv Function and the password created by Random Password function.
+#It will also create a csv file with the credentials post adding the users.
 function Add_ADUsers
 {
 Import-Module activedirectory

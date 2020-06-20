@@ -1,0 +1,131 @@
+#This function will create a Random Password which includes Upper case Alphabet, Lower case Alphabet, Numbers and Special Characters
+function Get-Randompwd
+{
+function Get-RandomCharacters($length, $characters) {
+    $random = 1..$length | ForEach-Object { Get-Random -Maximum $characters.length }
+    $private:ofs=""
+    return [String]$characters[$random]
+} 
+function Scramble-String([string]$inputString){     
+    $characterArray = $inputString.ToCharArray()   
+    $scrambledStringArray = $characterArray | Get-Random -Count $characterArray.Length     
+    $outputString = -join $scrambledStringArray
+    return $outputString 
+} 
+$password = Get-RandomCharacters -length 5 -characters 'abcdefghkmnoprstuvwxyz'
+$password += Get-RandomCharacters -length 1 -characters 'ABCDEFGHKMNOPRSTUVWXYZ'
+$password += Get-RandomCharacters -length 2 -characters '1234567890'
+$password += Get-RandomCharacters -length 5 -characters '!@#%^&'
+ 
+$password = Scramble-String $password
+Write-Output $password
+}
+
+#This function provides an option to the user to use his own password or wants the script to create a Random password 
+function Password_Request 
+{
+Switch (Read-Host "Would you like the password to be created automatically? Say Yes[Y] or No[N]")
+{ 
+"Y" {$password = (Get-Randompwd)
+Write-Output $password}
+"N" { $password = Read-Host "`nPassword you enter must meet the below complexity requirements: 
+    `nAt least one upper case English letter [A-Z]`nAt least one lower case English letter [a-z]`nAt least one digit [0-9]`nAt least one special character (!,@,#,%,^,&)`nMinimum 13 in length.
+    `nPlease enter your password"
+
+    if (($password -cmatch 'a|b|c|d|e|f|g|h|k|m|n|o|p|r|s|t|u|v|w|x|y|z') -and ($password -cmatch 'A|B|C|D|E|F|G|H|K|M|N|O|P|R|S|T|U|V|W|X|Y|Z') -and ($password -match '\d') -and ($password.length -ge 13) -and ($password -match '!|@|#|%|^|&'))
+        {Write-Output $password}
+
+    else {Write-Host 'Password does not meet the complexity requirement'
+    (Password_Request)}
+    }
+} 
+} 
+
+#This function creates a CSV file for the list of users to be added to AD.
+#It will take the password from the Random Password generator function and the inputs provided by the user to create the CSV File.
+function Input_Csv
+{
+Import-Module Activedirectory
+$SAP=Read-Host "Please provide the name of the OU "
+$Server = Read-Host "Please provide the Server name "
+$D= Get-ADGroup -Server $Server -filter "Name -like '$SAP'"
+$OU=$D.DistinguishedName -replace $D.DistinguishedName.Split(',')[0]+','
+$loc= Read-Host "Please provide the path for user list "
+$Mydom=Get-ADDomain -server $Server
+$domain=$Mydom.DNSRoot
+$US=import-csv $Loc 
+foreach($User in $US){
+$Nam=$User.Name
+$Name= $Nam -replace "[^a-zA-Z0-9.' ']"
+$FirstName,$Lastname= -split $Name
+[PSCustomObject]@{
+        "GivenName" = $FirstName
+        "Surname" = $Lastname
+        "Name"  = $FirstName+' '+$Lastname
+        "DisplayName"  = $FirstName+' '+$Lastname
+        "SamAccountName"  = $FirstName.ToCharArray()[0] + $Lastname
+        "Path"  = $OU
+        "UserPrincipalName"  = $FirstName.ToCharArray()[0] + $Lastname+"@"+$domain
+        "ServerName"  = $Server
+        "OU"  = $SAP
+}| Export-Csv C:\NGInstalls\UserImport\Input\$SAP.csv -Append -NoTypeInformation
+} $Input_File= "C:\NGInstalls\UserImport\Input\$SAP.csv"
+Write-Output $Input_File
+}
+
+#This function is used to change of the messages used in the script.
+function Green 
+{ process {Write-Host $_ -foregroundColor Green}
+}
+
+#This function is used to change of the messages used in the script.
+Function Yellow
+{ process {Write-Host $_ -ForegroundColor Yellow}
+}
+
+#This function adds the users to AD using the CSV file created by Input_Csv Function and the password created by Random Password function.
+function Add_ADUsers
+{
+Import-Module activedirectory
+$Pwd = (Password_Request)
+$File=(Input_Csv)
+$ADUsers = Import-csv $File
+$date = Get-Date
+$Description=Read-Host "Please provide the Description for the Users "
+foreach ($User in $ADUsers)
+{
+	$Username 	= $User.SamAccountName
+	$Firstname 	= $User.GivenName
+	$Lastname 	= $User.SurName
+	$OU 		= $User.Path
+    $Name      = $User.Name
+    $PrincipalName = $User.UserPrincipalName
+    $SAP=$User.SAP
+    $Serv=$User.ServerName
+    $Group=$SAP+"-Users"
+
+    if (Get-ADUser -Server $Serv -F {SamAccountName -eq $Username})
+        { Get-ADUser -identity $Username -Server $Serv | Select-object SamAccountName, Name,DistinguishedName | FL | Out-file C:\NGInstalls\UserImport\Output\AlreadyExist\$SAP-$(Get-Date -f "MMddyyyy_HHmm").txt -Append
+          Write-Output "User $Username already exist. For more information, Please check the latest AlreadyExists file under C:\NGInstalls\UserImport\Output\AlreadyExist\$SAP-$(Get-Date -f "MMddyyyy_HHmm").txt" | Yellow
+          }
+    else
+        {
+        
+        New-ADUser -Name $Name -SamAccountName $Username -GivenName $Firstname -Surname $Lastname -DisplayName $Name -Path $OU -UserPrincipalName $PrincipalName -Description $Description -Enabled $true -Server $Serv -AccountPassword (ConvertTo-SecureString $Pwd -AsPlainText -Force) -ChangePasswordAtLogon $True
+        Add-ADGroupMember -Identity $Group -Server $Serv -Members $Username   
+        $Output = $Name+ "`t" + $Username + "`t" + $Pwd 
+        $Output | Out-File "C:\NGInstalls\UserImport\Output\$SAP-credentials.txt" -Append 
+           
+    }
+
+} 
+
+if ((Test-Path C:\NGInstalls\UserImport\Output\$SAP-credentials.txt -PathType Leaf) -eq $false)
+{}
+else
+{
+Import-Csv C:\NGInstalls\UserImport\Output\$SAP-credentials.txt -Delimiter "`t" -Header 'Name','Username','Password' | Export-Csv C:\NGInstalls\UserImport\Output\$SAP-credentials-$(Get-date -f "MMddyyy_HHmm").csv -append -NoTypeInformation
+Remove-Item C:\NGInstalls\UserImport\Output\$SAP-credentials.txt
+Write-Output "`nUser accounts have been created. For Credentials, please check C:\NGInstalls\UserImport\Output\$SAP-credentials-$(Get-date -f "MMddyyy_HHmm").csv" | Green
+}Remove-Item C:\NGInstalls\UserImport\Input\$SAP.csv
+}

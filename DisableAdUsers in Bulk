@@ -1,0 +1,70 @@
+function Input_Csv
+{
+Import-Module Activedirectory
+$SAP=Read-Host "Please provide the SAP number "
+$Server = Read-Host "Please provide the Server name "
+$D= Get-ADGroup -Server $Server -filter "Name -like '$SAP-Users'"
+$OU=$D.DistinguishedName -replace $D.DistinguishedName.Split(',')[0]+','
+$loc= Read-Host "Please provide the path for user list "
+$Mydom=Get-ADDomain -server $Server
+$domain=$Mydom.DNSRoot
+$US=import-csv $loc 
+
+foreach($User in $US)
+    {
+$Nam=$User.Name
+$logid=$User.UserLoginID
+$Name= $Nam -replace "[^a-zA-Z0-9.' ']"
+$LoginID= $logid  -replace "[^a-zA-Z0-9]"
+    [PSCustomObject]@{
+                        "SamAccountName" = $LoginID
+                        "Path" = $OU
+                        "ServerName" = $Server
+                        "SAP" = $SAP
+                        }| Export-Csv C:\NGInstalls\DisableUser\Input\$SAP.csv -Append -NoTypeInformation
+
+        } 
+
+$Input_File= "C:\NGInstalls\DisableUser\Input\$SAP.csv"
+Write-Output $Input_File
+}
+
+
+
+
+
+Function ADUsers_Disable
+{
+    Import-Module activedirectory
+    $File= (Input_Csv)
+    $DisableUsers = Import-csv $File
+    $date = Get-Date
+    $Description=Read-Host "Please provide the Description for the Disabled Users "
+    $SAP=$DisableUsers.SAP[0]
+
+
+    Foreach ($User in $DisableUsers)
+    {
+        $Username = $User.SamAccountName
+        $OU=$User.Path
+        $Serv=$User.ServerName
+
+
+
+        if (Get-ADUser -Server $Serv -F {(SamAccountName -eq $Username)}) 
+            {
+	            if (Get-ADUser -Server $Serv -F {(SamAccountName -eq $Username) -and (Enabled -eq $True)}) 
+	                {
+                        Set-ADUser -Identity $Username -Server $Serv -Description $Description -Enabled $false
+                        } 
+	            else {Write-Host "User $Username is already in disabled state" -ForegroundColor Green }
+
+                    }
+
+        else {Write-Host "User $Username doesn't exist." -ForegroundColor Yellow}
+
+        } 
+    if ((Test-Path C:\NGInstalls\DisableUser\Input\$SAP.csv -PathType Leaf) -eq $True)
+    {Remove-Item C:\NGInstalls\DisableUser\Input\$SAP.csv
+    Write-Host "Task has been completed"}
+    }
